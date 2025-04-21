@@ -1,6 +1,6 @@
-import javax.crypto.*;
-import javax.crypto.interfaces.*;
-import javax.crypto.spec.*;
+import javax.crypto.interfaces.DHPublicKey;
+import javax.crypto.spec.DHParameterSpec;
+import javax.crypto.KeyAgreement;
 import java.io.*;
 import java.math.BigInteger;
 import java.net.Socket;
@@ -19,134 +19,103 @@ public class DelegadoServidor implements Runnable {
 
     @Override
     public void run() {
-        try {
-            ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
-            ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
+        try (ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
+                ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
 
-            // 1. Generación de parámetros Diffie-Hellman
+            // 1. Generar parámetros DH y claves
             AlgorithmParameterGenerator paramGen = AlgorithmParameterGenerator.getInstance("DH");
             paramGen.init(1024);
-            AlgorithmParameters params = paramGen.generateParameters();
-            DHParameterSpec dhSpec = params.getParameterSpec(DHParameterSpec.class);
+            DHParameterSpec dhSpec = paramGen.generateParameters().getParameterSpec(DHParameterSpec.class);
 
             KeyPairGenerator kpg = KeyPairGenerator.getInstance("DH");
             kpg.initialize(dhSpec);
             KeyPair keyPair = kpg.generateKeyPair();
 
-            // Enviar parámetros y clave pública al cliente
             out.writeObject(dhSpec.getP());
             out.writeObject(dhSpec.getG());
             out.writeObject(keyPair.getPublic().getEncoded());
 
-            // Recibir clave pública del cliente
             byte[] clientPubBytes = (byte[]) in.readObject();
-            KeyFactory kf = KeyFactory.getInstance("DH");
-            X509EncodedKeySpec x509Spec = new X509EncodedKeySpec(clientPubBytes);
-            PublicKey clientPublicKey = kf.generatePublic(x509Spec);
+            PublicKey clientPublic = KeyFactory.getInstance("DH")
+                    .generatePublic(new X509EncodedKeySpec(clientPubBytes));
 
-            // Generar llave compartida
             KeyAgreement ka = KeyAgreement.getInstance("DH");
             ka.init(keyPair.getPrivate());
-            ka.doPhase(clientPublicKey, true);
+            ka.doPhase(clientPublic, true);
             byte[] sharedSecret = ka.generateSecret();
 
-            // Derivar claves (AES y HMAC)
-            MessageDigest sha512 = MessageDigest.getInstance("SHA-512");
-            byte[] digest = sha512.digest(sharedSecret);
-            byte[] aesKey = Arrays.copyOfRange(digest, 0, 32);
-            byte[] hmacKey = Arrays.copyOfRange(digest, 32, 64);
+            byte[][] claves = Crypto.derivarClaves(sharedSecret);
+            byte[] aesKey = claves[0];
+            byte[] hmacKey = claves[1];
 
-            // 2. Serializar y cifrar la tabla de servicios
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            ObjectOutputStream tempOut = new ObjectOutputStream(bos);
-            tempOut.writeObject(servicios);
-            byte[] tablaBytes = bos.toByteArray();
+            // 2. Serializar la tabla de servicios
+            ByteArrayOutputStream tablaOut = new ByteArrayOutputStream();
+            new ObjectOutputStream(tablaOut).writeObject(servicios);
+            byte[] tablaBytes = tablaOut.toByteArray();
 
-            // Firmar con SHA256withRSA
-            PrivateKey privateKey = cargarLlavePrivada("keys/private_key.pem");
-            Signature firma = Signature.getInstance("SHA256withRSA");
-            firma.initSign(privateKey);
-            firma.update(tablaBytes);
-            byte[] firmaBytes = firma.sign();
+            // 3. Firmar tabla
+            long inicioFirma = System.nanoTime();
+            byte[] firma = Crypto.firmar(tablaBytes, Crypto.cargarLlavePrivada("keys/private_key.pem"));
+            long finFirma = System.nanoTime();
+            long tiempoFirmaMs = (finFirma - inicioFirma) / 1_000_000;
+            System.out.println("[MEDICIÓN] Firma digital: " + tiempoFirmaMs + " ms");
 
-            // Cifrado AES-CBC
-            Cipher aes = Cipher.getInstance("AES/CBC/PKCS5Padding");
-            SecretKey aesSecretKey = new SecretKeySpec(aesKey, "AES");
+            // 4. Cifrado con AES-CBC
             byte[] iv = new byte[16];
             new SecureRandom().nextBytes(iv);
-            IvParameterSpec ivSpec = new IvParameterSpec(iv);
-            aes.init(Cipher.ENCRYPT_MODE, aesSecretKey, ivSpec);
-            byte[] tablaCifrada = aes.doFinal(tablaBytes);
 
-            // HMAC
-            Mac hmac = Mac.getInstance("HmacSHA256");
-            SecretKey hmacSecretKey = new SecretKeySpec(hmacKey, "HmacSHA256");
-            hmac.init(hmacSecretKey);
-            byte[] hmacTabla = hmac.doFinal(tablaCifrada);
+            long inicioCifrado = System.nanoTime();
+            byte[] tablaCifrada = Crypto.cifrarAES(tablaBytes, aesKey, iv);
+            long finCifrado = System.nanoTime();
+            long tiempoCifradoMs = (finCifrado - inicioCifrado) / 1_000_000;
+            System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoMs + " ms");
 
-            // Enviar: IV, firma, tabla cifrada, HMAC
+            // 5. HMAC de la tabla cifrada
+            byte[] hmac = Crypto.generarHMAC(tablaCifrada, hmacKey);
+
+            // 6. Enviar todo al cliente
             out.writeObject(iv);
-            out.writeObject(firmaBytes);
+            out.writeObject(firma);
             out.writeObject(tablaCifrada);
-            out.writeObject(hmacTabla);
+            out.writeObject(hmac);
 
-            // 3. Recibir solicitud del cliente (servicio id)
-            int servicioSolicitado = in.readInt();
+            // 7. Recibir ID de servicio + HMAC del cliente
+            int id = in.readInt();
             byte[] hmacRecibido = (byte[]) in.readObject();
 
-            // Verificar HMAC del número recibido
-            ByteArrayOutputStream tmp = new ByteArrayOutputStream();
-            DataOutputStream dos = new DataOutputStream(tmp);
-            dos.writeInt(servicioSolicitado);
-            byte[] data = tmp.toByteArray();
-            byte[] hmacEsperado = hmac.doFinal(data);
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            new DataOutputStream(bos).writeInt(id);
+            byte[] datos = bos.toByteArray();
 
-            if (!Arrays.equals(hmacRecibido, hmacEsperado)) {
+            long inicioVerificacion = System.nanoTime();
+            boolean hmacOk = Crypto.verificarHMAC(datos, hmacKey, hmacRecibido);
+            long finVerificacion = System.nanoTime();
+            long tiempoVerificacionMs = (finVerificacion - inicioVerificacion) / 1_000_000;
+            System.out.println("[MEDICIÓN] Verificación HMAC de consulta: " + tiempoVerificacionMs + " ms");
+
+            if (!hmacOk) {
                 out.writeObject("Error en la consulta");
-                socket.close();
                 return;
             }
 
-            // Buscar servicio
-            Servicio s = servicios.get(servicioSolicitado);
-            int puerto = (s != null) ? s.getPuerto() : -1;
+            // 8. Buscar servicio solicitado
+            Servicio s = servicios.get(id);
             String ip = (s != null) ? s.getIp() : "-1";
+            int puerto = (s != null) ? s.getPuerto() : -1;
 
-            // Enviar respuesta + HMAC
-            ByteArrayOutputStream bos2 = new ByteArrayOutputStream();
-            ObjectOutputStream oos2 = new ObjectOutputStream(bos2);
-            oos2.writeObject(ip);
-            oos2.writeInt(puerto);
-            byte[] respuestaBytes = bos2.toByteArray();
-            byte[] hmacRespuesta = hmac.doFinal(respuestaBytes);
+            // 9. Enviar respuesta con HMAC
+            ByteArrayOutputStream response = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(response);
+            oos.writeObject(ip);
+            oos.writeInt(puerto);
+            byte[] respuestaBytes = response.toByteArray();
 
+            byte[] hmacRespuesta = Crypto.generarHMAC(respuestaBytes, hmacKey);
             out.writeObject(respuestaBytes);
             out.writeObject(hmacRespuesta);
-
-            socket.close();
 
         } catch (Exception e) {
             e.printStackTrace();
         }
-    }
-
-    private PrivateKey cargarLlavePrivada(String ruta) throws Exception {
-        File file = new File(ruta);
-        FileInputStream fis = new FileInputStream(file);
-        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-        byte[] temp = new byte[1024];
-        int bytesRead;
-        while ((bytesRead = fis.read(temp)) != -1) {
-            buffer.write(temp, 0, bytesRead);
-        }
-        byte[] keyBytes = buffer.toByteArray();
-        fis.close();
-
-        String keyPEM = new String(keyBytes).replaceAll("-----\\w+ PRIVATE KEY-----", "").replaceAll("\\s", "");
-        byte[] decoded = Base64.getDecoder().decode(keyPEM);
-
-        PKCS8EncodedKeySpec spec = new PKCS8EncodedKeySpec(decoded);
-        KeyFactory kf = KeyFactory.getInstance("RSA");
-        return kf.generatePrivate(spec);
     }
 }
