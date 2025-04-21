@@ -83,6 +83,10 @@ public class Cliente {
             // 3. Recibir respuesta
             Object obj = in.readObject();
             if (obj instanceof String) {
+                System.out.println("⚠️ Mensaje de error recibido del servidor: " + obj);
+                return;
+            }
+            if (obj instanceof String) {
                 System.out.println((String) obj); // Error
                 return;
             }

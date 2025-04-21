@@ -22,7 +22,10 @@ public class DelegadoServidor implements Runnable {
         try (ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
                 ObjectInputStream in = new ObjectInputStream(socket.getInputStream())) {
 
+            System.out.println("🟢 Cliente conectado. Iniciando protocolo...");
+
             // 1. Generar parámetros DH y claves
+            System.out.println("⚙️  Generando parámetros DH...");
             AlgorithmParameterGenerator paramGen = AlgorithmParameterGenerator.getInstance("DH");
             paramGen.init(1024);
             DHParameterSpec dhSpec = paramGen.generateParameters().getParameterSpec(DHParameterSpec.class);
@@ -31,11 +34,15 @@ public class DelegadoServidor implements Runnable {
             kpg.initialize(dhSpec);
             KeyPair keyPair = kpg.generateKeyPair();
 
+            System.out.println("📤 Enviando parámetros DH y clave pública...");
             out.writeObject(dhSpec.getP());
             out.writeObject(dhSpec.getG());
             out.writeObject(keyPair.getPublic().getEncoded());
 
+            System.out.println("📥 Esperando clave pública del cliente...");
             byte[] clientPubBytes = (byte[]) in.readObject();
+
+            System.out.println("🔑 Recibida clave pública del cliente. Generando llave compartida...");
             PublicKey clientPublic = KeyFactory.getInstance("DH")
                     .generatePublic(new X509EncodedKeySpec(clientPubBytes));
 
@@ -47,13 +54,16 @@ public class DelegadoServidor implements Runnable {
             byte[][] claves = Crypto.derivarClaves(sharedSecret);
             byte[] aesKey = claves[0];
             byte[] hmacKey = claves[1];
+            System.out.println("✅ Claves derivadas correctamente.");
 
             // 2. Serializar la tabla de servicios
+            System.out.println("📦 Serializando tabla de servicios...");
             ByteArrayOutputStream tablaOut = new ByteArrayOutputStream();
             new ObjectOutputStream(tablaOut).writeObject(servicios);
             byte[] tablaBytes = tablaOut.toByteArray();
 
             // 3. Firmar tabla
+            System.out.println("✍️  Firmando la tabla...");
             long inicioFirma = System.nanoTime();
             byte[] firma = Crypto.firmar(tablaBytes, Crypto.cargarLlavePrivada("keys/private_key.pem"));
             long finFirma = System.nanoTime();
@@ -61,6 +71,7 @@ public class DelegadoServidor implements Runnable {
             System.out.println("[MEDICIÓN] Firma digital: " + tiempoFirmaMs + " ms");
 
             // 4. Cifrado con AES-CBC
+            System.out.println("🔐 Cifrando la tabla con AES...");
             byte[] iv = new byte[16];
             new SecureRandom().nextBytes(iv);
 
@@ -71,15 +82,18 @@ public class DelegadoServidor implements Runnable {
             System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoMs + " ms");
 
             // 5. HMAC de la tabla cifrada
+            System.out.println("🔎 Generando HMAC de la tabla cifrada...");
             byte[] hmac = Crypto.generarHMAC(tablaCifrada, hmacKey);
 
             // 6. Enviar todo al cliente
+            System.out.println("📤 Enviando IV, firma, tabla cifrada y HMAC al cliente...");
             out.writeObject(iv);
             out.writeObject(firma);
             out.writeObject(tablaCifrada);
             out.writeObject(hmac);
 
             // 7. Recibir ID de servicio + HMAC del cliente
+            System.out.println("📥 Esperando ID del servicio y su HMAC...");
             int id = in.readInt();
             byte[] hmacRecibido = (byte[]) in.readObject();
 
@@ -94,28 +108,36 @@ public class DelegadoServidor implements Runnable {
             System.out.println("[MEDICIÓN] Verificación HMAC de consulta: " + tiempoVerificacionMs + " ms");
 
             if (!hmacOk) {
+                System.out.println("❌ HMAC de consulta inválido. Terminando conexión.");
                 out.writeObject("Error en la consulta");
                 return;
             }
 
             // 8. Buscar servicio solicitado
+            System.out.println("🔍 Buscando servicio con ID: " + id);
             Servicio s = servicios.get(id);
             String ip = (s != null) ? s.getIp() : "-1";
             int puerto = (s != null) ? s.getPuerto() : -1;
 
             // 9. Enviar respuesta con HMAC
+            System.out.println("📤 Enviando IP y puerto cifrados con HMAC...");
             ByteArrayOutputStream response = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(response);
             oos.writeObject(ip);
             oos.writeInt(puerto);
             byte[] respuestaBytes = response.toByteArray();
+            System.out.println("✅ Enviando respuesta: " + ip + ":" + puerto);
 
             byte[] hmacRespuesta = Crypto.generarHMAC(respuestaBytes, hmacKey);
             out.writeObject(respuestaBytes);
             out.writeObject(hmacRespuesta);
 
+            System.out.println("✅ Respuesta enviada correctamente. Cerrando conexión.");
+
         } catch (Exception e) {
+            System.err.println("❌ Error en DelegadoServidor:");
             e.printStackTrace();
         }
     }
+
 }
