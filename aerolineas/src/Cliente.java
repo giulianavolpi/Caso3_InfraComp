@@ -15,6 +15,43 @@ public class Cliente {
             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
 
+            // ==============================
+            // NUEVA SECCIÓN: Challenge-Response (Reto-Respuesta)
+            // ==============================
+            // Paso 1: Enviar "HELLO"
+            System.out.println("Enviando saludo al servidor...");
+            out.writeObject("HELLO");
+
+            // Paso 4: Recibir reto cifrado
+            System.out.println("Esperando reto cifrado del servidor...");
+            byte[] retoCifrado = (byte[]) in.readObject();
+
+            // Paso 5: Descifrar reto con la llave pública del servidor
+            PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem");
+            Cipher cipherRSA = Cipher.getInstance("RSA");
+            cipherRSA.init(Cipher.DECRYPT_MODE, publicKey);
+            byte[] retoBytes = cipherRSA.doFinal(retoCifrado);
+            // long reto = new BigInteger(retoBytes).longValue();  // ❌ Esto se comenta porque puede perder bits
+            BigInteger reto = new BigInteger(retoBytes);           // ✅ Corrección: usar BigInteger directamente
+            System.out.println("Reto recibido y descifrado: " + reto);
+
+            // Paso 5b: Enviar el reto descifrado al servidor
+            // out.writeLong(reto);  // ❌ Se comenta porque estamos usando BigInteger
+            out.writeObject(reto);  // ✅ Corrección: enviar el BigInteger como Object
+            System.out.println("Reto enviado al servidor para verificación.");
+
+            // Paso 6: Esperar confirmación del servidor
+            String confirmacion = (String) in.readObject();
+            if (!"OK".equals(confirmacion)) {
+                System.out.println("Error en el protocolo de inicio. Terminando...");
+                return;
+            }
+            System.out.println("Protocolo de inicio completado con éxito. Continuando con Diffie-Hellman...");
+
+            // ==============================
+            // CONTINÚA TU PROTOCOLO COMO ESTABA
+            // ==============================
+
             // 1. DH: Recibir parámetros y clave pública del servidor
             BigInteger p = (BigInteger) in.readObject();
             BigInteger g = (BigInteger) in.readObject();
@@ -51,10 +88,22 @@ public class Cliente {
                 return;
             }
 
+            long inicioDescifrado = System.nanoTime();
             byte[] tablaBytes = Crypto.descifrarAES(tablaCifrada, aesKey, iv);
+            long finDescifrado = System.nanoTime();
+            long tiempoDescifradoMs = (finDescifrado - inicioDescifrado) / 1_000_000;
+            System.out.println("[MEDICIÓN] Descifrado AES de la tabla: " + tiempoDescifradoMs + " ms");
 
+            // if (!Crypto.verificarFirma(tablaBytes, firma, pubKey)) { ... }  // ❌ Bloque anterior comentado
             PublicKey pubKey = Crypto.cargarLlavePublica("keys/public_key.pem");
-            if (!Crypto.verificarFirma(tablaBytes, firma, pubKey)) {
+
+            long inicioVerifFirma = System.nanoTime();
+            boolean firmaOk = Crypto.verificarFirma(tablaBytes, firma, pubKey);
+            long finVerifFirma = System.nanoTime();
+            long tiempoVerifFirmaMs = (finVerifFirma - inicioVerifFirma) / 1_000_000;
+            System.out.println("[MEDICIÓN] Verificación de firma RSA: " + tiempoVerifFirmaMs + " ms");
+
+            if (!firmaOk) {
                 System.out.println("Error en la consulta (firma inválida)");
                 return;
             }
@@ -86,15 +135,21 @@ public class Cliente {
                 System.out.println("Mensaje de error recibido del servidor: " + obj);
                 return;
             }
-            if (obj instanceof String) {
-                System.out.println((String) obj); // Error
-                return;
-            }
 
             byte[] respuesta = (byte[]) obj;
             byte[] hmacResp = (byte[]) in.readObject();
 
-            if (!Crypto.verificarHMAC(respuesta, hmacKey, hmacResp)) {
+            /*if (!Crypto.verificarHMAC(respuesta, hmacKey, hmacResp)) {
+                System.out.println("Error en la consulta (respuesta inválida)");
+                return;
+            }*/ 
+            long inicioVerifHMACResp = System.nanoTime();
+            boolean hmacRespOk = Crypto.verificarHMAC(respuesta, hmacKey, hmacResp);
+            long finVerifHMACResp = System.nanoTime();
+            long tiempoVerifHMACRespMs = (finVerifHMACResp - inicioVerifHMACResp) / 1_000_000;
+            System.out.println("[MEDICIÓN] Verificación HMAC de la respuesta: " + tiempoVerifHMACRespMs + " ms");
+
+            if (!hmacRespOk) {
                 System.out.println("Error en la consulta (respuesta inválida)");
                 return;
             }

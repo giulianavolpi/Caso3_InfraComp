@@ -5,6 +5,7 @@ import java.net.Socket;
 import java.security.*;
 import java.security.spec.*;
 import javax.crypto.KeyAgreement;
+import javax.crypto.Cipher;
 import java.util.*;
 
 public class ClienteIterativo {
@@ -15,7 +16,38 @@ public class ClienteIterativo {
             ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
             ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
 
+            // ==============================
+            // NUEVA SECCIÓN: Challenge-Response (Reto-Respuesta)
+            // ==============================
+            System.out.println("Enviando saludo al servidor...");
+            out.writeObject("HELLO");
+
+            System.out.println("Esperando reto cifrado del servidor...");
+            byte[] retoCifrado = (byte[]) in.readObject();
+
+            // Descifrar reto con la llave pública del servidor
+            PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem");
+            Cipher cipherRSA = Cipher.getInstance("RSA");
+            cipherRSA.init(Cipher.DECRYPT_MODE, publicKey);
+            byte[] retoBytes = cipherRSA.doFinal(retoCifrado);
+            long reto = new BigInteger(retoBytes).longValue();
+            System.out.println("Reto recibido y descifrado: " + reto);
+
+            // Enviar el reto descifrado al servidor
+            out.writeLong(reto);
+            System.out.println("Reto enviado al servidor para verificación.");
+
+            // Esperar confirmación del servidor
+            String confirmacion = (String) in.readObject();
+            if (!"OK".equals(confirmacion)) {
+                System.out.println("Error en el protocolo de inicio. Terminando...");
+                return;
+            }
+            System.out.println("Protocolo de inicio completado con éxito. Continuando con Diffie-Hellman...");
+
+            // ==============================
             // 1. Recibir parámetros Diffie-Hellman
+            // ==============================
             BigInteger p = (BigInteger) in.readObject();
             BigInteger g = (BigInteger) in.readObject();
             byte[] serverPubBytes = (byte[]) in.readObject();
@@ -42,7 +74,9 @@ public class ClienteIterativo {
             byte[] aesKey = claves[0];
             byte[] hmacKey = claves[1];
 
+            // ==============================
             // 2. Recibir y validar la tabla de servicios
+            // ==============================
             byte[] iv = (byte[]) in.readObject();
             byte[] firmaBytes = (byte[]) in.readObject();
             byte[] tablaCifrada = (byte[]) in.readObject();
@@ -54,7 +88,7 @@ public class ClienteIterativo {
             }
 
             byte[] tablaBytes = Crypto.descifrarAES(tablaCifrada, aesKey, iv);
-            PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem");
+            // PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem"); // Ya cargada arriba
 
             if (!Crypto.verificarFirma(tablaBytes, firmaBytes, publicKey)) {
                 System.out.println("Firma digital inválida");
