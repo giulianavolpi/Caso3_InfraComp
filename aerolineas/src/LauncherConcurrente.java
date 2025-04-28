@@ -28,8 +28,10 @@ public class LauncherConcurrente {
                     long inicioCliente = System.nanoTime(); // Medir tiempo individual de cada cliente
                     Cliente.main(null); // ejecuta el mismo cliente (una sola consulta)
                     long finCliente = System.nanoTime();
-                    long duracionCliente = (finCliente - inicioCliente) / 1_000_000;
-                    System.out.println("[Cliente " + clienteId + "] Tiempo de ejecución: " + duracionCliente + " ms");
+                    long duracionClienteNs = finCliente - inicioCliente;
+                    double duracionClienteMs = duracionClienteNs / 1_000_000.0;
+                    System.out.println("[Cliente " + clienteId + "] Tiempo de ejecución: " + duracionClienteNs + " ns (" + duracionClienteMs + " ms)");
+
                 } catch (Exception e) {
                     System.err.println("[Cliente " + clienteId + "] Error durante la ejecución:");
                     e.printStackTrace();
@@ -43,7 +45,8 @@ public class LauncherConcurrente {
         }
 
         long fin = System.nanoTime();
-        long duracionMs = (fin - inicio) / 1_000_000;
-        System.out.println("Todos los clientes terminaron. Tiempo total: " + duracionMs + " ms");
+        long duracionMs = fin - inicio;
+        double duracionNs = duracionMs / 1_000_000.0;
+        System.out.println("Todos los clientes terminaron. Tiempo total: " + duracionNs + " ns (" + duracionMs + " ms)");
     }
 }

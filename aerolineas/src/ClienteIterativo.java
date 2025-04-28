@@ -90,15 +90,23 @@ public class ClienteIterativo {
             long inicioDescifrado = System.nanoTime();
             byte[] tablaBytes = Crypto.descifrarAES(tablaCifrada, aesKey, iv);
             long finDescifrado = System.nanoTime();
-            long tiempoDescifradoMs = (finDescifrado - inicioDescifrado) / 1_000_000;
-            System.out.println("[MEDICIÓN] Descifrado AES de la tabla: " + tiempoDescifradoMs + " ms");
+
+            long tiempoDescifradoNs = finDescifrado - inicioDescifrado;
+            double tiempoDescifradoMs = tiempoDescifradoNs / 1_000_000.0;
+
+            System.out.println("[MEDICIÓN] Descifrado AES de la tabla: " + tiempoDescifradoNs + " ns (" + tiempoDescifradoMs + " ms)");
+
 
             // Verificación de firma (medida de tiempo)
             long inicioVerifFirma = System.nanoTime();
             boolean firmaOk = Crypto.verificarFirma(tablaBytes, firmaBytes, publicKey);
             long finVerifFirma = System.nanoTime();
-            long tiempoVerifFirmaMs = (finVerifFirma - inicioVerifFirma) / 1_000_000;
-            System.out.println("[MEDICIÓN] Verificación de firma RSA: " + tiempoVerifFirmaMs + " ms");
+
+            long tiempoVerifFirmaNs = finVerifFirma - inicioVerifFirma;
+            double tiempoVerifFirmaMs = tiempoVerifFirmaNs / 1_000_000.0;
+
+            System.out.println("[MEDICIÓN] Verificación de firma RSA: " + tiempoVerifFirmaNs + " ns (" + tiempoVerifFirmaMs + " ms)");
+
 
             if (!firmaOk) {
                 System.out.println("Firma digital inválida");
@@ -136,8 +144,12 @@ public class ClienteIterativo {
                 long inicioVerifHMACResp = System.nanoTime();
                 boolean hmacRespOk = Crypto.verificarHMAC(respuesta, hmacKey, hmacRespuesta);
                 long finVerifHMACResp = System.nanoTime();
-                long tiempoVerifHMACRespMs = (finVerifHMACResp - inicioVerifHMACResp) / 1_000_000;
-                System.out.println("[MEDICIÓN] Verificación HMAC de la respuesta: " + tiempoVerifHMACRespMs + " ms");
+
+                long tiempoVerifHMACRespNs = finVerifHMACResp - inicioVerifHMACResp;
+                double tiempoVerifHMACRespMs = tiempoVerifHMACRespNs / 1_000_000.0;
+
+                System.out.println("[MEDICIÓN] Verificación HMAC de la respuesta: " + tiempoVerifHMACRespNs + " ns (" + tiempoVerifHMACRespMs + " ms)");
+
 
                 if (!hmacRespOk) {
                     System.out.println("[" + i + "] HMAC inválido en respuesta");

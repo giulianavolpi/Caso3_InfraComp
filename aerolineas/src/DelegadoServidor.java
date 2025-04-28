@@ -117,11 +117,14 @@ public class DelegadoServidor implements Runnable {
 
             // 3. Firmar tabla
             System.out.println("Firmando la tabla...");
+            System.out.println("Firmando la tabla...");
             long inicioFirma = System.nanoTime();
             byte[] firma = Crypto.firmar(tablaBytes, Crypto.cargarLlavePrivada("keys/private_key.pem"));
             long finFirma = System.nanoTime();
-            long tiempoFirmaMs = (finFirma - inicioFirma) / 1_000_000;
-            System.out.println("[MEDICIÓN] Firma digital: " + tiempoFirmaMs + " ms");
+            long tiempoFirmaNano = finFirma - inicioFirma;
+            double tiempoFirmaMs = tiempoFirmaNano / 1_000_000.0;
+            System.out.println("[MEDICIÓN] Firma digital: " + tiempoFirmaNano + " ns (" + tiempoFirmaMs + " ms)");
+
 
             // 4. Cifrado con AES-CBC
             System.out.println("Cifrando la tabla con AES...");
@@ -131,8 +134,11 @@ public class DelegadoServidor implements Runnable {
             long inicioCifrado = System.nanoTime();
             byte[] tablaCifrada = Crypto.cifrarAES(tablaBytes, aesKey, iv);
             long finCifrado = System.nanoTime();
-            long tiempoCifradoMs = (finCifrado - inicioCifrado) / 1_000_000;
-            System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoMs + " ms");
+            long tiempoCifradoNano = finCifrado - inicioCifrado;
+            double tiempoCifradoMs = tiempoCifradoNano / 1_000_000.0;
+            System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoNano + " ns (" + tiempoCifradoMs + " ms)");
+            
+
 
             // medir RSA
             if (usarRSA) {
@@ -152,8 +158,11 @@ public class DelegadoServidor implements Runnable {
                     rsaOut.write(encryptedBlock);
                 }
                 long finCifradoRSA = System.nanoTime();
-                long tiempoCifradoRSAMs = (finCifradoRSA - inicioCifradoRSA) / 1_000_000;
-                System.out.println("[MEDICIÓN] Cifrado RSA (comparativo): " + tiempoCifradoRSAMs + " ms");
+                //long tiempoCifradoRSAMs = (finCifradoRSA - inicioCifradoRSA) / 1_000_000;
+                long tiempoCifradoRSANano = finCifradoRSA - inicioCifradoRSA;
+                double tiempoCifradoRSAMs = tiempoCifradoRSANano / 1_000_000.0;
+
+                System.out.println("[MEDICIÓN] Cifrado RSA (comparativo): " + tiempoCifradoRSANano + " ns (" + tiempoCifradoRSAMs + " ms)");
             }
 
             // 5. HMAC de la tabla cifrada
@@ -204,8 +213,12 @@ public class DelegadoServidor implements Runnable {
             long inicioVerificacion = System.nanoTime();
             boolean hmacOk = Crypto.verificarHMAC(datos, hmacKey, hmacRecibido);
             long finVerificacion = System.nanoTime();
-            long tiempoVerificacionMs = (finVerificacion - inicioVerificacion) / 1_000_000;
-            System.out.println("[MEDICIÓN] Verificación HMAC de consulta: " + tiempoVerificacionMs + " ms");
+            long tiempoVerificacionNano = finVerificacion - inicioVerificacion;
+            double tiempoVerificacionMs = tiempoVerificacionNano / 1_000_000.0;
+    
+            System.out.println("[MEDICIÓN] Verificación HMAC de consulta: " + tiempoVerificacionNano + " ns (" + tiempoVerificacionMs + " ms)");
+
+
 
             if (!hmacOk) {
                 System.out.println("HMAC de consulta inválido. Terminando conexión.");
