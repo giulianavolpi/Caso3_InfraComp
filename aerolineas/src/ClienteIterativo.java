@@ -20,24 +20,26 @@ public class ClienteIterativo {
             // NUEVA SECCIÓN: Challenge-Response (Reto-Respuesta)
             // ==============================
             System.out.println("Enviando saludo al servidor...");
+    
+            out.writeObject("ITERATIVO"); 
             out.writeObject("HELLO");
 
             System.out.println("Esperando reto cifrado del servidor...");
             byte[] retoCifrado = (byte[]) in.readObject();
 
-            // Descifrar reto con la llave pública del servidor
+            // Paso 5: Descifrar reto con la llave pública del servidor
             PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem");
             Cipher cipherRSA = Cipher.getInstance("RSA");
             cipherRSA.init(Cipher.DECRYPT_MODE, publicKey);
             byte[] retoBytes = cipherRSA.doFinal(retoCifrado);
-            long reto = new BigInteger(retoBytes).longValue();
-            System.out.println("Reto recibido y descifrado: " + reto);
+            BigInteger retoBigInt = new BigInteger(retoBytes); //paso de long a bigint
+            System.out.println("Reto recibido y descifrado: " + retoBigInt);
 
-            // Enviar el reto descifrado al servidor
-            out.writeLong(reto);
+            // Paso 5b: Enviar el reto descifrado al servidor (como BigInteger)
+            out.writeObject(retoBigInt); // se cambio a bigInt con long no servia
             System.out.println("Reto enviado al servidor para verificación.");
 
-            // Esperar confirmación del servidor
+            // Paso 6: Esperar confirmación del servidor
             String confirmacion = (String) in.readObject();
             if (!"OK".equals(confirmacion)) {
                 System.out.println("Error en el protocolo de inicio. Terminando...");
@@ -57,14 +59,11 @@ public class ClienteIterativo {
             kpg.initialize(dhSpec);
             KeyPair keyPair = kpg.generateKeyPair();
 
-            // Enviar clave pública
             out.writeObject(keyPair.getPublic().getEncoded());
 
-            // Clave pública del servidor
             PublicKey serverPubKey = KeyFactory.getInstance("DH")
                     .generatePublic(new X509EncodedKeySpec(serverPubBytes));
 
-            // Generar llave compartida
             KeyAgreement ka = KeyAgreement.getInstance("DH");
             ka.init(keyPair.getPrivate());
             ka.doPhase(serverPubKey, true);
@@ -87,10 +86,21 @@ public class ClienteIterativo {
                 return;
             }
 
+            // Medición de tiempo de descifrado de la tabla
+            long inicioDescifrado = System.nanoTime();
             byte[] tablaBytes = Crypto.descifrarAES(tablaCifrada, aesKey, iv);
-            // PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem"); // Ya cargada arriba
+            long finDescifrado = System.nanoTime();
+            long tiempoDescifradoMs = (finDescifrado - inicioDescifrado) / 1_000_000;
+            System.out.println("[MEDICIÓN] Descifrado AES de la tabla: " + tiempoDescifradoMs + " ms");
 
-            if (!Crypto.verificarFirma(tablaBytes, firmaBytes, publicKey)) {
+            // Verificación de firma (medida de tiempo)
+            long inicioVerifFirma = System.nanoTime();
+            boolean firmaOk = Crypto.verificarFirma(tablaBytes, firmaBytes, publicKey);
+            long finVerifFirma = System.nanoTime();
+            long tiempoVerifFirmaMs = (finVerifFirma - inicioVerifFirma) / 1_000_000;
+            System.out.println("[MEDICIÓN] Verificación de firma RSA: " + tiempoVerifFirmaMs + " ms");
+
+            if (!firmaOk) {
                 System.out.println("Firma digital inválida");
                 return;
             }
@@ -122,7 +132,14 @@ public class ClienteIterativo {
                 byte[] respuesta = (byte[]) respuestaObj;
                 byte[] hmacRespuesta = (byte[]) in.readObject();
 
-                if (!Crypto.verificarHMAC(respuesta, hmacKey, hmacRespuesta)) {
+                // Verificación HMAC de la respuesta (medida de tiempo)
+                long inicioVerifHMACResp = System.nanoTime();
+                boolean hmacRespOk = Crypto.verificarHMAC(respuesta, hmacKey, hmacRespuesta);
+                long finVerifHMACResp = System.nanoTime();
+                long tiempoVerifHMACRespMs = (finVerifHMACResp - inicioVerifHMACResp) / 1_000_000;
+                System.out.println("[MEDICIÓN] Verificación HMAC de la respuesta: " + tiempoVerifHMACRespMs + " ms");
+
+                if (!hmacRespOk) {
                     System.out.println("[" + i + "] HMAC inválido en respuesta");
                     continue;
                 }

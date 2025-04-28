@@ -20,6 +20,7 @@ public class Cliente {
             // ==============================
             // Paso 1: Enviar "HELLO"
             System.out.println("Enviando saludo al servidor...");
+            out.writeObject("NORMAL"); 
             out.writeObject("HELLO");
 
             // Paso 4: Recibir reto cifrado
@@ -31,13 +32,13 @@ public class Cliente {
             Cipher cipherRSA = Cipher.getInstance("RSA");
             cipherRSA.init(Cipher.DECRYPT_MODE, publicKey);
             byte[] retoBytes = cipherRSA.doFinal(retoCifrado);
-            // long reto = new BigInteger(retoBytes).longValue();  // ❌ Esto se comenta porque puede perder bits
-            BigInteger reto = new BigInteger(retoBytes);           // ✅ Corrección: usar BigInteger directamente
+            // long reto = new BigInteger(retoBytes).longValue();  // pierde bits
+            BigInteger reto = new BigInteger(retoBytes);           //usar BigInteger directamente
             System.out.println("Reto recibido y descifrado: " + reto);
 
             // Paso 5b: Enviar el reto descifrado al servidor
-            // out.writeLong(reto);  // ❌ Se comenta porque estamos usando BigInteger
-            out.writeObject(reto);  // ✅ Corrección: enviar el BigInteger como Object
+            // out.writeLong(reto);  
+            out.writeObject(reto);  
             System.out.println("Reto enviado al servidor para verificación.");
 
             // Paso 6: Esperar confirmación del servidor

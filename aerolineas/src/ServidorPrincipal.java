@@ -10,14 +10,25 @@ public class ServidorPrincipal {
     public static void main(String[] args) throws IOException {
         inicializarServicios();
 
+        // ================================
+        //activar/desactivar RSA por consola
+        // ================================
+        boolean activarRSA = false; // Por defecto está apagado
+        if (args.length > 0) {
+            activarRSA = Boolean.parseBoolean(args[0]);  // Si paso 'true' lo activa
+        }
+        System.out.println("RSA ACTIVADO: " + activarRSA);
+
         try (ServerSocket serverSocket = new ServerSocket(PUERTO)) {
             System.out.println("Servidor Principal escuchando en el puerto " + PUERTO);
 
             while (true) {
                 Socket cliente = serverSocket.accept();
+                boolean rsaActivoFinal = activarRSA; // Variable final para usar dentro de la lambda
                 new Thread(() -> {
                     try {
-                        new DelegadoServidor(cliente, tablaServicios).run();
+                        // DelegadoServidor ahora recibe la bandera de RSA
+                        new DelegadoServidor(cliente, tablaServicios, rsaActivoFinal).run();
                     } catch (Exception e) {
                         e.printStackTrace();
                     }

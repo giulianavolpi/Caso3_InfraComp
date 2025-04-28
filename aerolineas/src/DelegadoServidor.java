@@ -12,10 +12,12 @@ import java.util.*;
 public class DelegadoServidor implements Runnable {
     private final Socket socket;
     private final Map<Integer, Servicio> servicios;
+    private final boolean usarRSA;//se usa o no RSA
 
-    public DelegadoServidor(Socket socket, Map<Integer, Servicio> servicios) {
+    public DelegadoServidor(Socket socket, Map<Integer, Servicio> servicios, boolean usarRSA) { 
         this.socket = socket;
         this.servicios = servicios;
+        this.usarRSA = usarRSA; 
     }
 
     @Override
@@ -26,10 +28,14 @@ public class DelegadoServidor implements Runnable {
             System.out.println("Cliente conectado. Iniciando protocolo...");
 
             // ==============================
-            // NUEVA SECCIÓN: Challenge-Response (Reto-Respuesta)
+            // NUEVA SECCIÓN: Challenge-Response (Reto-Respuesta) verifica si esta hablando con el servidor que es
             // ==============================
-            System.out.println("Esperando saludo del cliente...");
+            System.out.println("Esperando tipo de cliente...");
+            String tipoCliente = (String) in.readObject();
             String saludo = (String) in.readObject();
+            System.out.println("Tipo de cliente: " + tipoCliente);
+            System.out.println("Saludo recibido: " + saludo);
+
             if (!"HELLO".equals(saludo)) {
                 System.out.println("Saludo inválido. Terminando conexión.");
                 socket.close();
@@ -52,15 +58,13 @@ public class DelegadoServidor implements Runnable {
             System.out.println("Reto enviado al cliente.");
 
             // Paso 5: Esperar la respuesta del cliente (desencriptado del reto)
-            //long respuesta = in.readLong();  // ❌ Esto se cambia porque pierde precisión
-            BigInteger respuesta = (BigInteger) in.readObject();  // ✅ Corrección: se recibe como BigInteger
+            BigInteger respuesta = (BigInteger) in.readObject();
 
-            // 🔥 Agrega estas dos líneas:
             System.out.println("Reto original (servidor): " + reto);
             System.out.println("Respuesta recibida del cliente: " + respuesta);
 
             // Paso 6: Verificar
-            if (!respuesta.equals(reto)) {  // ✅ Cambiado de '!=' a 'equals' para BigInteger
+            if (!respuesta.equals(reto)) {
                 System.out.println("Reto incorrecto. Terminando conexión.");
                 out.writeObject("ERROR");
                 socket.close();
@@ -130,6 +134,28 @@ public class DelegadoServidor implements Runnable {
             long tiempoCifradoMs = (finCifrado - inicioCifrado) / 1_000_000;
             System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoMs + " ms");
 
+            // medir RSA
+            if (usarRSA) {
+                System.out.println("[INFO] Realizando medición de cifrado RSA (comparativo)...");
+                Cipher cipherRSAComparativo = Cipher.getInstance("RSA");
+                PublicKey publicKey = Crypto.cargarLlavePublica("keys/public_key.pem");
+                cipherRSAComparativo.init(Cipher.ENCRYPT_MODE, publicKey);
+
+                int blockSize = 117; // RSA 1024 bits con PKCS1
+                ByteArrayOutputStream rsaOut = new ByteArrayOutputStream();
+
+                long inicioCifradoRSA = System.nanoTime();
+                for (int i = 0; i < tablaBytes.length; i += blockSize) {
+                    int length = Math.min(blockSize, tablaBytes.length - i);
+                    byte[] block = Arrays.copyOfRange(tablaBytes, i, i + length);
+                    byte[] encryptedBlock = cipherRSAComparativo.doFinal(block);
+                    rsaOut.write(encryptedBlock);
+                }
+                long finCifradoRSA = System.nanoTime();
+                long tiempoCifradoRSAMs = (finCifradoRSA - inicioCifradoRSA) / 1_000_000;
+                System.out.println("[MEDICIÓN] Cifrado RSA (comparativo): " + tiempoCifradoRSAMs + " ms");
+            }
+
             // 5. HMAC de la tabla cifrada
             System.out.println("Generando HMAC de la tabla cifrada...");
             byte[] hmac = Crypto.generarHMAC(tablaCifrada, hmacKey);
@@ -141,8 +167,33 @@ public class DelegadoServidor implements Runnable {
             out.writeObject(tablaCifrada);
             out.writeObject(hmac);
 
-            // 7. Recibir ID de servicio + HMAC del cliente
-            System.out.println("Esperando ID del servicio y su HMAC...");
+            // ================================================
+            // Definir si es normal(recibe solo 1) o iterativo(recibe n solicitudes)
+            // ================================================
+            boolean esIterativo = tipoCliente.equals("ITERATIVO");
+
+            if (esIterativo) {
+                for (int consulta = 1; consulta <= 32; consulta++) {
+                    System.out.println("Esperando ID del servicio y su HMAC (consulta " + consulta + "/32)...");
+                    if (!atenderConsulta(out, in, hmacKey)) {
+                        break;
+                    }
+                }
+                System.out.println("Cliente iterativo terminó las 32 consultas.");
+            } else {
+                System.out.println("Esperando ID del servicio y su HMAC (cliente normal)...");
+                atenderConsulta(out, in, hmacKey);
+            }
+
+            System.out.println("Cerrando conexión con el cliente.");
+        } catch (Exception e) {
+            System.err.println("Error en DelegadoServidor:");
+            e.printStackTrace();
+        }
+    }
+
+    private boolean atenderConsulta(ObjectOutputStream out, ObjectInputStream in, byte[] hmacKey) {
+        try {
             int id = in.readInt();
             byte[] hmacRecibido = (byte[]) in.readObject();
 
@@ -159,17 +210,15 @@ public class DelegadoServidor implements Runnable {
             if (!hmacOk) {
                 System.out.println("HMAC de consulta inválido. Terminando conexión.");
                 out.writeObject("Error en la consulta");
-                return;
+                return false;
             }
 
-            // 8. Buscar servicio solicitado
             System.out.println("Buscando servicio con ID: " + id);
             Servicio s = servicios.get(id);
             String ip = (s != null) ? s.getIp() : "-1";
             int puerto = (s != null) ? s.getPuerto() : -1;
 
-            // 9. Enviar respuesta con HMAC
-            System.out.println("Enviando IP y puerto cifrados con HMAC...");
+            System.out.println("Enviando respuesta: " + ip + ":" + puerto);
             ByteArrayOutputStream response = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(response);
             oos.writeObject(ip);
@@ -177,17 +226,15 @@ public class DelegadoServidor implements Runnable {
             oos.flush();
             oos.close();
             byte[] respuestaBytes = response.toByteArray();
-            System.out.println("Enviando respuesta: " + ip + ":" + puerto);
 
             byte[] hmacRespuesta = Crypto.generarHMAC(respuestaBytes, hmacKey);
             out.writeObject(respuestaBytes);
             out.writeObject(hmacRespuesta);
-
-            System.out.println("Respuesta enviada correctamente. Cerrando conexión.");
-
+            return true;
         } catch (Exception e) {
-            System.err.println("Error en DelegadoServidor:");
+            System.err.println("Error durante la consulta:");
             e.printStackTrace();
+            return false;
         }
     }
 }
