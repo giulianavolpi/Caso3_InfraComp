@@ -13,11 +13,13 @@ public class DelegadoServidor implements Runnable {
     private final Socket socket;
     private final Map<Integer, Servicio> servicios;
     private final boolean usarRSA;//se usa o no RSA
+    private final MedidorTiempos medidor;
 
-    public DelegadoServidor(Socket socket, Map<Integer, Servicio> servicios, boolean usarRSA) { 
+    public DelegadoServidor(Socket socket, Map<Integer, Servicio> servicios, boolean usarRSA,MedidorTiempos medidor) { 
         this.socket = socket;
         this.servicios = servicios;
         this.usarRSA = usarRSA; 
+        this.medidor=medidor;
     }
 
     @Override
@@ -123,6 +125,7 @@ public class DelegadoServidor implements Runnable {
             long finFirma = System.nanoTime();
             long tiempoFirmaNano = finFirma - inicioFirma;
             double tiempoFirmaMs = tiempoFirmaNano / 1_000_000.0;
+            medidor.agregarFirma(tiempoFirmaMs);
             System.out.println("[MEDICIÓN] Firma digital: " + tiempoFirmaNano + " ns (" + tiempoFirmaMs + " ms)");
 
 
@@ -136,6 +139,7 @@ public class DelegadoServidor implements Runnable {
             long finCifrado = System.nanoTime();
             long tiempoCifradoNano = finCifrado - inicioCifrado;
             double tiempoCifradoMs = tiempoCifradoNano / 1_000_000.0;
+            medidor.agregarCifradoAES(tiempoCifradoMs);
             System.out.println("[MEDICIÓN] Cifrado AES: " + tiempoCifradoNano + " ns (" + tiempoCifradoMs + " ms)");
             
 
@@ -161,7 +165,7 @@ public class DelegadoServidor implements Runnable {
                 //long tiempoCifradoRSAMs = (finCifradoRSA - inicioCifradoRSA) / 1_000_000;
                 long tiempoCifradoRSANano = finCifradoRSA - inicioCifradoRSA;
                 double tiempoCifradoRSAMs = tiempoCifradoRSANano / 1_000_000.0;
-
+                medidor.agregarCifradoRSA(tiempoCifradoRSAMs);
                 System.out.println("[MEDICIÓN] Cifrado RSA (comparativo): " + tiempoCifradoRSANano + " ns (" + tiempoCifradoRSAMs + " ms)");
             }
 
@@ -193,6 +197,7 @@ public class DelegadoServidor implements Runnable {
                 System.out.println("Esperando ID del servicio y su HMAC (cliente normal)...");
                 atenderConsulta(out, in, hmacKey);
             }
+            ServidorPrincipal.imprimirResumenSiAplica();
 
             System.out.println("Cerrando conexión con el cliente.");
         } catch (Exception e) {
@@ -215,7 +220,7 @@ public class DelegadoServidor implements Runnable {
             long finVerificacion = System.nanoTime();
             long tiempoVerificacionNano = finVerificacion - inicioVerificacion;
             double tiempoVerificacionMs = tiempoVerificacionNano / 1_000_000.0;
-    
+            medidor.agregarVerificacionHMAC(tiempoVerificacionMs);
             System.out.println("[MEDICIÓN] Verificación HMAC de consulta: " + tiempoVerificacionNano + " ns (" + tiempoVerificacionMs + " ms)");
 
 
