@@ -121,9 +121,9 @@ public class Cliente {
             @SuppressWarnings("unchecked")
             Map<Integer, Servicio> servicios = (Map<Integer, Servicio>) ois.readObject();
             System.out.println("Servicios disponibles:");
-            for (Servicio s : servicios.values()) {
+            /*for (Servicio s : servicios.values()) {
                 System.out.println("[" + s.getId() + "] " + s.getNombre());
-            }
+            }*/
 
             // Selección aleatoria
             List<Integer> ids = new ArrayList<>(servicios.keySet());
